@@ -26,21 +26,29 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 
 // API function to fetch categories
 const fetchCategories = async () => {
-  const response = await fetch('/api/Category?PageNumber=1&PageSize=50');
-  if (!response.ok) {
-    throw new Error('Failed to fetch categories');
+  try {
+    const response = await fetch('/api/Category?PageNumber=1&PageSize=50');
+    if (!response.ok) {
+      throw new Error('Failed to fetch categories');
+    }
+    const data = await response.json();
+    
+    if (data.success && data.data && Array.isArray(data.data.data)) {
+      return data.data.data;
+    }
+    
+    // Fallback: return empty array if data structure is unexpected
+    console.warn('Categories API returned unexpected data structure:', data);
+    return [];
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    return []; // Always return an array on error
   }
-  const data = await response.json();
-  
-  if (data.success && data.data && data.data.data) {
-    return data.data.data;
-  }
-  
-  return [];
 };
 
 // API function to fetch user by ID
@@ -113,19 +121,28 @@ const fetchProducts = async (filters?: { categoryId?: string; minPrice?: number;
   return { products: [], pagination: null };
 };
 
-// Helper function to get media URL
-const getMediaUrl = (mediaUrl: string) => {
+// Helper function to get media URL with better error handling
+const getMediaUrl = (mediaUrl: string | null) => {
   if (!mediaUrl) return null;
   
-  // The mediaUrl from API looks like "/media/products/images/filename.png"
-  // The API endpoint is /api/Media/file/{filePath} where:
-  // - filePath gets URL decoded
-  // - Leading slash gets removed 
-  // - Path separators get normalized
-  // - Must start with "media/products" or "media/services"
+  // Handle various URL formats
+  if (mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://')) {
+    return mediaUrl;
+  }
   
-  // Remove leading slash if present since API will remove it anyway
+  // Remove leading slash if present
   const cleanPath = mediaUrl.startsWith('/') ? mediaUrl.substring(1) : mediaUrl;
+  
+  // Check if it's a valid file extension
+  const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+  const hasValidExtension = validExtensions.some(ext => 
+    cleanPath.toLowerCase().endsWith(ext)
+  );
+  
+  if (!hasValidExtension) {
+    console.warn('Invalid image URL detected:', mediaUrl);
+    return null;
+  }
   
   // Construct the full API URL
   return `/api/Media/file/${cleanPath}`;
@@ -142,10 +159,15 @@ export default function Products() {
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // Fetch categories
-  const { data: categories } = useQuery({
+  const { data: categories, isLoading: categoriesLoading, error: categoriesError } = useQuery({
     queryKey: ['categories'],
     queryFn: fetchCategories,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: 3,
   });
+
+  // Ensure categories is always an array
+  const categoriesArray = Array.isArray(categories) ? categories : [];
 
   // Fetch user details when modal is open and product has userId
   const { data: productUser } = useQuery({
@@ -284,7 +306,7 @@ export default function Products() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Categories</SelectItem>
-                    {categories?.map((category: any) => (
+                    {categoriesArray?.map((category: any) => (
                       <SelectItem key={category.id} value={category.id}>
                         {category.name}
                       </SelectItem>
@@ -361,9 +383,9 @@ export default function Products() {
                 • {pagination.totalCount} total products
               </span>
             )}
-            {selectedCategoryId && selectedCategoryId !== 'all' && categories && (
+            {selectedCategoryId && selectedCategoryId !== 'all' && categoriesArray && (
               <span className="ml-2 text-primary">
-                • Filtered by: {categories.find((cat: any) => cat.id === selectedCategoryId)?.name}
+                • Filtered by: {categoriesArray.find((cat: any) => cat.id === selectedCategoryId)?.name}
               </span>
             )}
             {(minPrice || maxPrice) && (
@@ -383,15 +405,21 @@ export default function Products() {
               <Label htmlFor="category-select" className="text-sm font-medium">Category</Label>
               <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
                 <SelectTrigger className="w-64" id="category-select">
-                  <SelectValue placeholder="Filter by category" />
+                  <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Filter by category"} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Categories</SelectItem>
-                  {categories?.map((category: any) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
+                  {categoriesLoading ? (
+                    <SelectItem value="loading" disabled>Loading categories...</SelectItem>
+                  ) : categoriesError ? (
+                    <SelectItem value="error" disabled>Error loading categories</SelectItem>
+                  ) : (
+                    categoriesArray?.map((category: any) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -484,8 +512,6 @@ export default function Products() {
                             className="w-full h-full object-cover"
                             onError={(e) => {
                               const target = e.target as HTMLImageElement;
-                              console.warn('Failed to load image:', target.src);
-                              console.warn('Original media URL:', product.media[0].url);
                               target.style.display = 'none';
                               target.nextElementSibling?.classList.remove('hidden');
                             }}
@@ -687,6 +713,9 @@ export default function Products() {
               <Package className="text-primary" size={24} />
               {selectedProduct?.name || 'Product Details'}
             </DialogTitle>
+            <DialogDescription>
+              Detailed information about the product.
+            </DialogDescription>
           </DialogHeader>
           
           {selectedProduct && (
