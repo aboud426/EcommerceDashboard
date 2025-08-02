@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
 import {
   Table,
   TableBody,
@@ -21,7 +23,8 @@ import {
   Hash,
   ShoppingBag,
   LayoutGrid,
-  Table as TableIcon
+  Table as TableIcon,
+  Receipt
 } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -71,6 +74,39 @@ const fetchOrders = async (token: string) => {
   return { orders: [], pagination: null };
 };
 
+// API function to fetch transaction for an order
+const fetchTransaction = async (orderId: string, token: string) => {
+  console.log('🔍 Attempting to fetch transaction for order:', orderId);
+  
+  const response = await fetch(`http://localhost:3000/api/transactions/${orderId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  console.log('📊 Transaction API Response status:', response.status);
+  
+  if (!response.ok) {
+    const responseText = await response.text();
+    console.error('❌ Transaction API Error Response:', responseText);
+    
+    if (response.status === 404) {
+      throw new Error('No transaction found for this order');
+    }
+    if (response.status === 401) {
+      throw new Error('Authentication failed. Please log out and log in again.');
+    }
+    
+    throw new Error(`Failed to fetch transaction (${response.status})`);
+  }
+  
+  const data = await response.json();
+  console.log('✅ Transaction fetched successfully:', data);
+  return data;
+};
+
 // Helper function to format date
 const formatDate = (dateString: string) => {
   if (!dateString) return 'N/A';
@@ -116,7 +152,10 @@ export default function Orders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const { user, isAuthenticated } = useAuth();
+  const { toast } = useToast();
 
   // Rotating search placeholders
   const searchPlaceholders = [
@@ -149,6 +188,30 @@ export default function Orders() {
 
   const orders = data?.orders || [];
   const pagination = data?.pagination;
+
+  // Fetch transaction data when modal is open and orderId is selected
+  const { data: transactionData, isLoading: isTransactionLoading, error: transactionError } = useQuery({
+    queryKey: ['transaction', selectedOrderId],
+    queryFn: () => {
+      if (!user?.token || !selectedOrderId) {
+        throw new Error('Authentication or order ID required');
+      }
+      return fetchTransaction(selectedOrderId, user.token);
+    },
+    enabled: !!user?.token && !!selectedOrderId && isTransactionModalOpen,
+  });
+
+  // Handle transaction button click
+  const handleViewTransaction = (orderId: string) => {
+    setSelectedOrderId(orderId);
+    setIsTransactionModalOpen(true);
+  };
+
+  // Handle transaction modal close
+  const handleCloseTransactionModal = () => {
+    setIsTransactionModalOpen(false);
+    setSelectedOrderId(null);
+  };
 
   // Filter orders based on search term
   const filteredOrders = useMemo(() => {
@@ -340,6 +403,22 @@ export default function Orders() {
                             ${order.totalAmount || 0}
                           </span>
                         </div>
+                        
+                        {/* Transaction Button */}
+                        <div className="mt-3">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewTransaction(order.id);
+                            }}
+                            className="flex items-center gap-2"
+                          >
+                            <Receipt size={14} />
+                            View Transaction
+                          </Button>
+                        </div>
                       </div>
 
                       {/* Customer & Seller Info */}
@@ -445,6 +524,7 @@ export default function Orders() {
                         <TableHead>Payment</TableHead>
                         <TableHead>Created</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="text-center">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -507,6 +587,20 @@ export default function Orders() {
                               ${order.totalAmount || 0}
                             </span>
                           </TableCell>
+                          <TableCell className="text-center">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewTransaction(order.id);
+                              }}
+                              className="flex items-center gap-1"
+                            >
+                              <Receipt size={12} />
+                              Transaction
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -544,6 +638,89 @@ export default function Orders() {
           </div>
         </Card>
       )}
+
+      {/* Transaction Modal */}
+      <Dialog open={isTransactionModalOpen} onOpenChange={handleCloseTransactionModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <Receipt className="text-primary" size={24} />
+              Transaction Details
+            </DialogTitle>
+            <DialogDescription>
+              {selectedOrderId && `Transaction information for order: ${selectedOrderId.substring(0, 8)}...`}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {isTransactionLoading ? (
+              <div className="space-y-4">
+                <div className="h-4 bg-muted rounded w-48 animate-pulse"></div>
+                <div className="h-20 bg-muted rounded animate-pulse"></div>
+                <div className="h-4 bg-muted rounded w-32 animate-pulse"></div>
+              </div>
+            ) : transactionError ? (
+              <Card className="p-6 text-center">
+                <Receipt className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium mb-2">No Transaction Found</h3>
+                <p className="text-muted-foreground">
+                  {transactionError.message || 'No transaction record exists for this order.'}
+                </p>
+              </Card>
+            ) : transactionData ? (
+              <div className="space-y-4">
+                <Card className="p-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <h4 className="font-semibold mb-2">Transaction Information</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Transaction ID:</span>
+                          <span className="font-mono">{transactionData.id || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Amount:</span>
+                          <span className="font-semibold">${transactionData.amount || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Status:</span>
+                          <Badge variant={transactionData.status === 'completed' ? 'default' : 'secondary'}>
+                            {transactionData.status || 'Unknown'}
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Payment Method:</span>
+                          <span>{transactionData.paymentMethod || 'N/A'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold mb-2">Dates</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Created:</span>
+                          <span>{transactionData.createdAt ? formatDate(transactionData.createdAt) : 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Updated:</span>
+                          <span>{transactionData.updatedAt ? formatDate(transactionData.updatedAt) : 'N/A'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {transactionData.description && (
+                    <div className="mt-4 pt-4 border-t">
+                      <h4 className="font-semibold mb-2">Description</h4>
+                      <p className="text-sm text-muted-foreground">{transactionData.description}</p>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

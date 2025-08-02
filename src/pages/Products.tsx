@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
-import { Package, DollarSign, Image as ImageIcon, Filter, X, Calendar, User, Hash, LayoutGrid, Table as TableIcon } from "lucide-react";
+import { Package, DollarSign, Image as ImageIcon, Filter, X, Calendar, User, Hash, LayoutGrid, Table as TableIcon, Truck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 
 // API function to fetch categories
 const fetchCategories = async () => {
@@ -148,6 +150,39 @@ const getMediaUrl = (mediaUrl: string | null) => {
   return `/api/Media/file/${cleanPath}`;
 };
 
+// API function to fetch product ownership summary
+const fetchProductOwnership = async (serialNumber: string, token: string) => {
+  console.log('🔍 Attempting to fetch product ownership for serial:', serialNumber);
+  
+  const response = await fetch(`http://localhost:3000/api/product-ownership-summary/${serialNumber}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  console.log('📊 Product Ownership API Response status:', response.status);
+  
+  if (!response.ok) {
+    const responseText = await response.text();
+    console.error('❌ Product Ownership API Error Response:', responseText);
+    
+    if (response.status === 404) {
+      throw new Error('No ownership information found for this product');
+    }
+    if (response.status === 401) {
+      throw new Error('Authentication failed. Please log out and log in again.');
+    }
+    
+    throw new Error(`Failed to fetch product ownership (${response.status})`);
+  }
+  
+  const data = await response.json();
+  console.log('✅ Product ownership fetched successfully:', data);
+  return data;
+};
+
 export default function Products() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [minPrice, setMinPrice] = useState<string>('');
@@ -157,6 +192,10 @@ export default function Products() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [selectedSerialNumber, setSelectedSerialNumber] = useState<string | null>(null);
+  const [isOwnershipModalOpen, setIsOwnershipModalOpen] = useState(false);
+  const { user, isAuthenticated } = useAuth();
+  const { toast } = useToast();
 
   // Fetch categories
   const { data: categories, isLoading: categoriesLoading, error: categoriesError } = useQuery({
@@ -205,6 +244,30 @@ export default function Products() {
 
   const products: any[] = data?.products || [];
   const pagination = data?.pagination;
+
+  // Fetch product ownership data when modal is open and serial number is selected
+  const { data: ownershipData, isLoading: isOwnershipLoading, error: ownershipError } = useQuery({
+    queryKey: ['productOwnership', selectedSerialNumber],
+    queryFn: () => {
+      if (!user?.token || !selectedSerialNumber) {
+        throw new Error('Authentication or serial number required');
+      }
+      return fetchProductOwnership(selectedSerialNumber, user.token);
+    },
+    enabled: !!user?.token && !!selectedSerialNumber && isOwnershipModalOpen,
+  });
+
+  // Handle product tracking button click
+  const handleTrackProduct = (serialNumber: string) => {
+    setSelectedSerialNumber(serialNumber);
+    setIsOwnershipModalOpen(true);
+  };
+
+  // Handle ownership modal close
+  const handleCloseOwnershipModal = () => {
+    setIsOwnershipModalOpen(false);
+    setSelectedSerialNumber(null);
+  };
 
   // Handle price filter application
   const handleApplyPriceFilter = () => {
@@ -821,7 +884,23 @@ export default function Products() {
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Serial Number</Label>
-                      <p className="text-base font-mono">{selectedProduct.serialNumber || 'Not specified'}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-mono">{selectedProduct.serialNumber || 'Not specified'}</p>
+                        {selectedProduct.serialNumber && (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTrackProduct(selectedProduct.serialNumber);
+                            }}
+                            className="flex items-center gap-1"
+                          >
+                            <Truck size={12} />
+                            Track
+                          </Button>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <Label className="text-sm font-medium text-muted-foreground">Stock Quantity</Label>
@@ -883,6 +962,114 @@ export default function Products() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Product Ownership Modal */}
+      <Dialog open={isOwnershipModalOpen} onOpenChange={handleCloseOwnershipModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              <Truck className="text-primary" size={24} />
+              Product Ownership Summary
+            </DialogTitle>
+            <DialogDescription>
+              {selectedSerialNumber && `Ownership information for product serial: ${selectedSerialNumber}`}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {isOwnershipLoading ? (
+              <div className="space-y-4">
+                <div className="h-4 bg-muted rounded w-48 animate-pulse"></div>
+                <div className="h-20 bg-muted rounded animate-pulse"></div>
+                <div className="h-4 bg-muted rounded w-32 animate-pulse"></div>
+              </div>
+            ) : ownershipError ? (
+              <Card className="p-6 text-center">
+                <Truck className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium mb-2">No Ownership Information Found</h3>
+                <p className="text-muted-foreground">
+                  {ownershipError.message || 'No ownership record exists for this product serial number.'}
+                </p>
+              </Card>
+            ) : ownershipData ? (
+              <div className="space-y-4">
+                <Card className="p-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <h4 className="font-semibold mb-2">Product Information</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Serial Number:</span>
+                          <span className="font-mono">{ownershipData.serialNumber || selectedSerialNumber}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Product Name:</span>
+                          <span>{ownershipData.productName || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Model:</span>
+                          <span>{ownershipData.model || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Status:</span>
+                          <Badge variant={ownershipData.status === 'active' ? 'default' : 'secondary'}>
+                            {ownershipData.status || 'Unknown'}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="font-semibold mb-2">Ownership Details</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Current Owner:</span>
+                          <span>{ownershipData.currentOwner || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Purchase Date:</span>
+                          <span>{ownershipData.purchaseDate ? formatDate(ownershipData.purchaseDate) : 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Warranty:</span>
+                          <span>{ownershipData.warrantyStatus || 'N/A'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {ownershipData.history && ownershipData.history.length > 0 && (
+                    <div className="mt-4 pt-4 border-t">
+                      <h4 className="font-semibold mb-2">Ownership History</h4>
+                      <div className="space-y-2">
+                        {ownershipData.history.map((record: any, index: number) => (
+                          <div key={index} className="text-sm p-2 bg-muted/30 rounded">
+                            <div className="flex justify-between items-center">
+                              <span className="font-medium">{record.event || 'Transfer'}</span>
+                              <span className="text-muted-foreground">
+                                {record.date ? formatDate(record.date) : 'Date unknown'}
+                              </span>
+                            </div>
+                            {record.description && (
+                              <p className="text-muted-foreground mt-1">{record.description}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {ownershipData.notes && (
+                    <div className="mt-4 pt-4 border-t">
+                      <h4 className="font-semibold mb-2">Additional Notes</h4>
+                      <p className="text-sm text-muted-foreground">{ownershipData.notes}</p>
+                    </div>
+                  )}
+                </Card>
+              </div>
+            ) : null}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
