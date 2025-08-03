@@ -11,7 +11,9 @@ import {
   Menu,
   X,
   LogOut,
-  User
+  User,
+  UserPlus,
+
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +27,7 @@ const navigationItems = [
   { title: "Users", url: "/users", icon: Users },
   { title: "Orders", url: "/orders", icon: Receipt },
   { title: "Products", url: "/products", icon: ShoppingBag },
+  { title: "Register Admin", url: "/register-admin", icon: UserPlus },
 ];
 
 // Helper function to get profile photo URL

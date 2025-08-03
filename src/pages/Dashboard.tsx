@@ -1095,10 +1095,10 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Star className="text-primary" size={20} />
-              Top Products in Most Orders
+              Top 5 Products in Most Orders
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Top products that appear in the most orders
+              Top 5 products that appear in the most orders
             </p>
           </CardHeader>
           <CardContent>

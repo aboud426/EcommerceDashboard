@@ -14,6 +14,9 @@ import Users from "./pages/Users";
 import MediaTypes from "./pages/MediaTypes";
 import Payments from "./pages/Payments";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
+import RegisterAdmin from "./pages/RegisterAdmin";
+
 
 const queryClient = new QueryClient();
 
@@ -24,20 +27,29 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <ProtectedRoute>
-            <AdminLayout>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/categories" element={<Categories />} />
-                <Route path="/orders" element={<Orders />} />
-                <Route path="/products" element={<Products />} />
-                <Route path="/users" element={<Users />} />
-                <Route path="/media-types" element={<MediaTypes />} />
-                <Route path="/payments" element={<Payments />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </AdminLayout>
-          </ProtectedRoute>
+          <Routes>
+            {/* Public Routes - No Authentication Required */}
+            <Route path="/login" element={<Login />} />
+            
+            {/* Protected Routes - Authentication Required */}
+            <Route path="/*" element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/categories" element={<Categories />} />
+                    <Route path="/orders" element={<Orders />} />
+                    <Route path="/products" element={<Products />} />
+                    <Route path="/users" element={<Users />} />
+                    <Route path="/media-types" element={<MediaTypes />} />
+                    <Route path="/payments" element={<Payments />} />
+                    <Route path="/register-admin" element={<RegisterAdmin />} />
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </AdminLayout>
+              </ProtectedRoute>
+            } />
+          </Routes>
         </BrowserRouter>
       </TooltipProvider>
     </AuthProvider>

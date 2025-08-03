@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { User, Phone, Mail, Star, MessageCircle, Search, ShoppingCart, Package, Eye, Receipt } from "lucide-react";
+import { User, Phone, Mail, Star, MessageCircle, Search, ShoppingCart, Package, Eye, Receipt, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,8 +40,8 @@ const useDebounce = (value: string, delay: number) => {
   return debouncedValue;
 };
 
-// API function to fetch users
-const fetchUsers = async (searchName?: string) => {
+// API function to fetch users (auth required)
+const fetchUsers = async (searchName?: string, token?: string) => {
   let url = '/api/users?pageNumber=1&pageSize=10';
   
   // Use search endpoint if search term is provided
@@ -49,10 +49,21 @@ const fetchUsers = async (searchName?: string) => {
     url = `/api/users/search?name=${encodeURIComponent(searchName.trim())}&pageNumber=1&pageSize=10`;
   }
   
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication failed. Please login again.');
+    }
     throw new Error('Failed to fetch users');
   }
+  
   const data = await response.json();
   
   // Extract the users array from the nested response structure
@@ -196,9 +207,23 @@ export default function Users() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['users', debouncedSearchTerm],
-    queryFn: () => fetchUsers(debouncedSearchTerm),
-    keepPreviousData: true, // Prevents jarring re-renders and maintains input focus
+    queryFn: () => {
+      console.log('🔄 useQuery fetchUsers called');
+      console.log('👤 Current user state:', { 
+        hasUser: !!user, 
+        hasToken: !!user?.token, 
+        userEmail: user?.email 
+      });
+      
+      if (!user?.token) {
+        console.error('❌ No authentication token available');
+        throw new Error('Authentication required to fetch users');
+      }
+      return fetchUsers(debouncedSearchTerm, user.token);
+    },
+
     staleTime: 1000 * 60 * 5, // Cache results for 5 minutes
+    enabled: !!user?.token, // Only run query if user is authenticated
   });
 
   // Query for user cart (only when modal is open and user is selected)
@@ -430,6 +455,7 @@ export default function Users() {
               <TableHead className="w-[80px]">Avatar</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Contact</TableHead>
+              <TableHead>Role</TableHead>
               <TableHead>Rating</TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="text-center">Actions</TableHead>
@@ -494,6 +520,31 @@ export default function Users() {
                   </div>
                 </TableCell>
 
+                {/* Role */}
+                <TableCell>
+                  {(() => {
+                    // Get role from API response, default to "user" if null
+                    const userRole = user.userType || "user";
+
+                    // Determine badge style and icon based on role
+                    if (userRole === 'admin') {
+                      return (
+                        <Badge variant="default" className="flex items-center gap-1 w-fit">
+                          <Shield className="w-3 h-3" />
+                          Admin
+                        </Badge>
+                      );
+                    } else {
+                      return (
+                        <Badge variant="outline" className="flex items-center gap-1 w-fit">
+                          <User className="w-3 h-3" />
+                          User
+                        </Badge>
+                      );
+                    }
+                  })()}
+                </TableCell>
+
                 {/* Rating */}
                 <TableCell>
                   {user.rating > 0 ? (
@@ -523,23 +574,41 @@ export default function Users() {
                 {/* Actions */}
                 <TableCell className="text-center">
                   <div className="flex gap-2 justify-center">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleViewCart(user)}
-                  >
-                      <ShoppingCart size={14} className="mr-1" />
-                      Cart
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleViewOrders(user)}
-                    >
-                      <Receipt size={14} className="mr-1" />
-                      Orders
-                  </Button>
-                </div>
+                    {/* Only show Cart and Orders buttons for regular users */}
+                    {(() => {
+                      const userType = user.userType || "user";
+                      const isRegularUser = userType === "user";
+                      
+                      if (isRegularUser) {
+                        return (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleViewCart(user)}
+                            >
+                              <ShoppingCart size={14} className="mr-1" />
+                              Cart
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleViewOrders(user)}
+                            >
+                              <Receipt size={14} className="mr-1" />
+                              Orders
+                            </Button>
+                          </>
+                        );
+                      } else {
+                        return (
+                          <span className="text-sm text-muted-foreground">
+                            No actions available
+                          </span>
+                        );
+                      }
+                    })()}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

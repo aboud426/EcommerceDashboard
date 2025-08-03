@@ -53,11 +53,20 @@ const fetchCategories = async () => {
   }
 };
 
-// API function to fetch user by ID
-const fetchUserById = async (userId: string) => {
+// API function to fetch user by ID (auth required)
+const fetchUserById = async (userId: string, token: string) => {
   if (!userId) return null;
-  const response = await fetch(`/api/users/${userId}`);
+  const response = await fetch(`/api/users/${userId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Authentication failed. Please login again.');
+    }
     throw new Error('Failed to fetch user');
   }
   const data = await response.json();
@@ -211,8 +220,13 @@ export default function Products() {
   // Fetch user details when modal is open and product has userId
   const { data: productUser } = useQuery({
     queryKey: ['user', selectedProduct?.userId],
-    queryFn: () => fetchUserById(selectedProduct?.userId),
-    enabled: !!selectedProduct?.userId && isProductModalOpen,
+    queryFn: () => {
+      if (!user?.token || !selectedProduct?.userId) {
+        throw new Error('Authentication required to fetch user details');
+      }
+      return fetchUserById(selectedProduct.userId, user.token);
+    },
+    enabled: !!selectedProduct?.userId && isProductModalOpen && !!user?.token,
   });
 
   // Fetch category details when modal is open and product has categoryId
